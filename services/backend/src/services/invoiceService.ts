@@ -14,18 +14,41 @@ interface InvoiceRow {
 }
 
 class InvoiceService {
-  static async list( userId: string, status?: string, operator?: string): Promise<Invoice[]> {
-    let q = db<InvoiceRow>('invoices').where({ userId: userId });
-    if (status) q = q.andWhereRaw(" status "+ operator + " '"+ status +"'");
-    const rows = await q.select();
-    const invoices = rows.map(row => ({
+
+  // Modificado en PRACTICO 02
+  static async list(userId: string, status?: string, operator?: string): Promise<Invoice[]> {
+    let q = db<InvoiceRow>('invoices').where({ userId });
+
+    if (status) {
+      // Validar status contra un conjunto permitido (seria correcto validarlo con una tabla de estados en la BD)
+      const allowedStatus = new Set(['paid', 'unpaid']);
+      if (!allowedStatus.has(status)) {
+        throw new Error('Invalid status');
+      }
+
+      // Whitelist de operadores (si realmente hace falta)
+      // Para un campo de texto "status", típicamente solo "=" o "!=" tienen sentido.
+      const op = operator ?? '=';
+      switch (op) {
+        case '=':
+          q = q.andWhere('status', status);
+          break;
+        case '!=':
+          q = q.andWhereNot('status', status);
+          break;
+        default:
+          throw new Error('Invalid operator');
+      }
+    }
+
+    const rows = await q.select('id', 'userId', 'amount', 'dueDate', 'status');
+    return rows.map(row => ({
       id: row.id,
       userId: row.userId,
       amount: row.amount,
       dueDate: row.dueDate,
-      status: row.status} as Invoice
-    ));
-    return invoices;
+      status: row.status
+    }));
   }
 
   static async setPaymentCard(
