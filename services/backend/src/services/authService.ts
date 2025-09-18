@@ -8,6 +8,7 @@ import bcrypt from 'bcrypt';
 
 const BCRYPT_COST = parseInt(process.env.BCRYPT_COST || '12', 10);
 const PEPPER = process.env.PEPPER || '';
+const ALLOW_LEGACY_PW_MIGRATION = (process.env.ALLOW_LEGACY_PW_MIGRATION || 'true').toLowerCase() === 'true';
 
 async function hashPassword(plain: string): Promise<string> {
   return bcrypt.hash(plain + PEPPER, BCRYPT_COST);
@@ -107,7 +108,11 @@ class AuthService {
     if (looksHashed) {
       ok = await verifyPassword(password, user.password);
     } else {
-      // legacy plaintext support: if it matches, rehash transparently
+      // legacy plaintext support gated by feature flag
+      if (!ALLOW_LEGACY_PW_MIGRATION) {
+        // refuse legacy plaintext passwords when migration window is closed
+        throw new Error('Invalid password');
+      }
       ok = (password === user.password);
       if (ok) {
         const newHash = await hashPassword(password);
