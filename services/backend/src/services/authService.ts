@@ -1,10 +1,22 @@
-
 import crypto from 'crypto';
 import nodemailer from 'nodemailer';
 import db from '../db';
 import { User,UserRow } from '../types/user';
 import jwtUtils from '../utils/jwt';
 import ejs from 'ejs';
+import bcrypt from 'bcrypt';
+
+const BCRYPT_COST = parseInt(process.env.BCRYPT_COST || '12', 10);
+const PEPPER = process.env.PEPPER || '';
+const ALLOW_LEGACY_PW_MIGRATION = (process.env.ALLOW_LEGACY_PW_MIGRATION || 'true').toLowerCase() === 'true';
+
+async function hashPassword(plain: string): Promise<string> {
+  return bcrypt.hash(plain + PEPPER, BCRYPT_COST);
+}
+
+async function verifyPassword(plain: string, hash: string): Promise<boolean> {
+  return bcrypt.compare(plain + PEPPER, hash);
+}
 
 const RESET_TTL = 1000 * 60 * 60;         // 1h
 const INVITE_TTL = 1000 * 60 * 60 * 24 * 7; // 7d
@@ -20,10 +32,11 @@ class AuthService {
     // create invite token
     const invite_token = crypto.randomBytes(6).toString('hex');
     const invite_token_expires = new Date(Date.now() + INVITE_TTL);
+    const passwordHash = await hashPassword(user.password);
     await db<UserRow>('users')
       .insert({
         username: user.username,
-        password: user.password,
+        password: passwordHash,
         email: user.email,
         first_name: user.first_name,
         last_name:  user.last_name,
@@ -64,15 +77,21 @@ class AuthService {
       .where({ id: user.id })
       .first();
     if (!existing) throw new Error('User not found');
+
+    const updateData: Partial<UserRow> = {
+      username: user.username,
+      email: user.email,
+      first_name: user.first_name,
+      last_name: user.last_name
+    };
+
+    if (user.password && user.password.trim() !== '') {
+      updateData.password = await hashPassword(user.password);
+    }
+
     await db<UserRow>('users')
       .where({ id: user.id })
-      .update({
-        username: user.username,
-        password: user.password,
-        email: user.email,
-        first_name: user.first_name,
-        last_name: user.last_name
-      });
+      .update(updateData);
     return existing;
   }
 
@@ -82,7 +101,26 @@ class AuthService {
       .andWhere('activated', true)
       .first();
     if (!user) throw new Error('Invalid email or not activated');
-    if (password != user.password) throw new Error('Invalid password');
+
+    let ok = false;
+    const looksHashed = typeof user.password === 'string' && /^\$2[aby]\$/.test(user.password);
+
+    if (looksHashed) {
+      ok = await verifyPassword(password, user.password);
+    } else {
+      // legacy plaintext support gated by feature flag
+      if (!ALLOW_LEGACY_PW_MIGRATION) {
+        // refuse legacy plaintext passwords when migration window is closed
+        throw new Error('Invalid password');
+      }
+      ok = (password === user.password);
+      if (ok) {
+        const newHash = await hashPassword(password);
+        await db('users').where({ id: user.id }).update({ password: newHash });
+      }
+    }
+
+    if (!ok) throw new Error('Invalid password');
     return user;
   }
 
@@ -128,10 +166,11 @@ class AuthService {
       .first();
     if (!row) throw new Error('Invalid or expired reset token');
 
+    const newHash = await hashPassword(newPassword);
     await db('users')
       .where({ id: row.id })
       .update({
-        password: newPassword,
+        password: newHash,
         reset_password_token: null,
         reset_password_expires: null
       });
@@ -144,9 +183,10 @@ class AuthService {
       .first();
     if (!row) throw new Error('Invalid or expired invite token');
 
+    const newHash2 = await hashPassword(newPassword);
     await db('users')
       .update({
-        password: newPassword,
+        password: newHash2,
         invite_token: null,
         invite_token_expires: null
       })
