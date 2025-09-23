@@ -336,16 +336,18 @@ describe('AuthService.generateJwt', () => {
   });
 
   it('generateJwt', () => {
-    const userId = 'abcd-1234';
-    const token = AuthService.generateJwt(userId);
+  const userId = 'abcd-1234';
+  const JWT_SECRET = process.env.JWT_SECRET!;
+  const token = AuthService.generateJwt(userId);
 
-    // token should be a non-empty string
-    expect(typeof token).toBe('string');
-    expect(token.length).toBeGreaterThan(0);
+  // token should be a non-empty string
+  expect(typeof token).toBe('string');
+  expect(token.length).toBeGreaterThan(0);
 
-    // verify the token decodes to our payload
-    const decoded = jwt.verify(token,"secreto_super_seguro");
-    expect((decoded as any).id).toBe(userId);
-  });
+  // verify the token decodes to our payload
+  const decoded = jwt.verify(token, JWT_SECRET);
+  expect((decoded as any).id).toBe(userId);
+});
 
 });
+        
