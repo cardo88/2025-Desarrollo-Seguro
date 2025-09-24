@@ -176,6 +176,89 @@ y nos devuelve el error que agregamos para cuando el `status` no corresponde
 
 ![alt text](image-2.png)
 
+
+# CREDENCIALES EMBEBIDAS (BELEN)
+
+# FALSIFICACIÒN DE PETICIONES DEL LADO DEL SERVIDOR (BELEN)
+
+
+---
+
+## RECORRIDO DE DIRECTORIOS (CWE-22)
+
+### **Identificar**
+
+Còdigo encontrado en el backend: `services/backend/src/services/invoiceService.ts`
+
+```tsx
+  static async getReceipt(
+    invoiceId: string,
+    pdfName: string
+  ) {
+    // check if the invoice exists
+    const invoice = await db<InvoiceRow>('invoices').where({ id: invoiceId}).first();
+    if (!invoice) {
+      throw new Error('Invoice not found');
+    }
+    try {
+      const filePath = `/invoices/${pdfName}`;
+      const content = await fs.readFile(filePath, 'utf-8');
+      return content;
+    } catch (error) {
+      // send the error to the standard output
+      console.error('Error reading receipt file:', error);
+      throw new Error('Receipt not found');
+
+    } 
+
+  };
+```
+
+Este còdigo es vulnerable a Path traversal, ya que las lìneas:
+```tsx
+  const filePath = `/invoices/${pdfName}`;
+  const content = await fs.readFile(filePath, 'utf-8');
+  return content;
+```
+
+la variable `filePath` está armando la ruta de la `url` pegando direcramente lo que viene del usuario (`pdfName`) al directorio `/invoices`, y luego lo abre con `fs.readFile` sin verificar nada antes.
+Esto significa que si alguien envía `pdfName` con rutas relativas como `../`, la ruta que se manda podría salir del directorio `/invoices` y apuntar a archivos que estén afuera que el proceso pueda leer, por lo que trataría de un Path Traversal.
+
+### Validar
+
+#### Introducción
+Para reproducir la vulnerabilidad Path Traversal en `getReceipt`, crearemos un archivo `.txt` de prueba dentro del contenedor backend y luego intentaremos leerlo a través del endpoint de facturas usando el parámetro `pdfName` (`GET /invoices/{id}/invoice?pdfName=...`) usando un payload que salga del directorio `/invoices` .
+
+Si la respuesta devuelve el contenido del archivo `.txt` de prueba creado, se podrá confirmar que la aplicación construye rutas a partir de datos controlados por el usuario sin normalizarlas ni validarlas, por lo que estaremos frente a un caso de Path Traversal.
+
+#### Paso1: Creamos el archivo de prueba .txt
+Creamos el archivo `archivoEncontrado.txt` dentro del contenedor backend:
+```bash
+  docker compose exec backend sh -c "mkdir -p /tmp/poc_test_dir && echo 'llegaste a la vulnerabilidad' > /tmp/poc_test_dir/archivoEncontrado.txt && cat /tmp/poc_test_dir/archivoEncontrado.txt"
+```
+
+
+#### Paso 2: Calculamos la ruta relativa del archivo
+Calculamos la ruta relativa que hay desde `/invoices` hasta el archivo que tendremos como objetivo `/tmp/carpetaPOC/archivoEncontrado.txt`  usando  `path.relative`, para poder utilizar en el endpoint de consulta de facturas que se pasará como `pdfName`.
+
+```bash
+  docker compose exec backend node -e "const path=require('path'); console.log(path.relative(process.argv[1], process.argv[2]));" "/invoices" "/tmp/carpetaPOC/archivoEncontrado.tx
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ## Almacenamiento inseguro (CWE-256)
 
 ### **Identificar**
