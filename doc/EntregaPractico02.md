@@ -177,9 +177,9 @@ y nos devuelve el error que agregamos para cuando el `status` no corresponde
 ![alt text](image-2.png)
 
 
-# CREDENCIALES EMBEBIDAS (BELEN)
+## CREDENCIALES EMBEBIDAS (BELEN)
 
-# FALSIFICACIÒN DE PETICIONES DEL LADO DEL SERVIDOR (BELEN)
+## FALSIFICACIÒN DE PETICIONES DEL LADO DEL SERVIDOR (BELEN)
 
 
 
@@ -344,6 +344,7 @@ Para resolver la vulnerabilidad, lo que haremos es modificar el método estátic
 Comenzamos definiendo el directorio base seguro (`baseFilePath`), luego normalizamos la ruta juntando ese directorio con el `pdfName` mediante `path.resolve`, lo que elimina secuencias como `..` o `.` y devuelve una ruta absoluta. Después, con `baseWithSep` nos aseguramos de que la ruta final siga dentro de `/invoices`, evitando escapes hacia otros directorios.
 
 Si todas estas validaciones se cumplen, se utiliza la ruta resultante (`resolved`) para acceder al archivo solicitado juntando `baseFilePath` con `pdfName` .
+
 ---
 
 **Validar**
