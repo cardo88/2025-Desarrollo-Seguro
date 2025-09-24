@@ -222,6 +222,7 @@ Este còdigo es vulnerable a Path traversal, ya que las lìneas:
 
 la variable `filePath` está armando la ruta de la `url` pegando direcramente lo que viene del usuario (`pdfName`) al directorio `/invoices`, y luego lo abre con `fs.readFile` sin verificar nada antes.
 Esto significa que si alguien envía `pdfName` con rutas relativas como `../`, la ruta que se manda podría salir del directorio `/invoices` y apuntar a archivos que estén afuera que el proceso pueda leer, por lo que trataría de un Path Traversal.
+
 ---
 
 ### Validar
@@ -279,6 +280,7 @@ Este paso es clave ya que acá se prueba la existencia del Path Traversal. Media
 ![alt text](image-20.png)
 
 El servidor respondió con `200 OK` y en el cuerpo devolvió el texto que está dentro del archivo de prueba. Esto confirma que el parámetro `pdfName` permitió salir del directorio `/invoices` y acceder a un archivo arbitrario en `/tmp`, demostrando la vulnerabilidad de Path Traversal.
+
 ---
 
 ### Remediar
@@ -362,6 +364,7 @@ Para hacer esto, lo que haremos es realizar el paso 6 del PoC para poder visuali
 ![alt text](image-21.png)
 
 La respuesta obtenida fue de `500 Internal Server Error`. Esto indica que la validación implementada en la mitigación detectó que la ruta solicitada salía del directorio permitido (`/invoices`) y bloqueó el acceso. De esta manera concluimos que la mitigación quedó realizada de manera correcta.
+
 ---
 ---
 
@@ -441,6 +444,7 @@ Con el usuario de `id=1`, mediante un `CURL`, solicitaremos la factura de `id=4`
 ![alt text](image-25.png)
 
 La respuesta fue `200 OK` y nos mostró la factura del usuario de `id=2`, por lo que la vulnerabilidad realmente existe.
+
 ---
 
 ### Remediar
@@ -542,6 +546,7 @@ Con el `TOKEN` recientemente consultado, consultaremos por la factura de `id=4` 
 ![alt text](image-28.png)
 
 Obtuvimos una respuesta correcta, se pudo visualizar la factura perteneciente al usuario. Concluimos que la vulnerabilidad de Missing authorization identificada se mitigó de manera correcta.
+
 ---
 ---
 
