@@ -129,28 +129,37 @@ class InvoiceService {
       .update({ status: 'paid' });
   }
 
-  static async getInvoice(invoiceId: string): Promise<Invoice> {
-    const invoice = await db<InvoiceRow>('invoices').where({ id: invoiceId }).first();
+  /////////////////////////////////////////////////////////////////////////// VULNERABILIDAD; MISSING AUTHORIZATION
+  static async getInvoice(invoiceId: string, currentUserId: string): Promise<Invoice> {
+    const invoice = await db<InvoiceRow>('invoices').where({ id: invoiceId, userId: currentUserId }).first();
     if (!invoice) {
       throw new Error('Invoice not found');
     }
     return invoice as Invoice;
   }
+  /////////////////////////////////////////////////////////////////////////
 
+  /////////////////////////////////////////////////////////////////////////// VULNERABILIDAD; PATH TRAVERSAL
   static async getReceipt(invoiceId: string, pdfName: string) {
     const invoice = await db<InvoiceRow>('invoices').where({ id: invoiceId }).first();
     if (!invoice) {
       throw new Error('Invoice not found');
     }
     try {
-      const filePath = `/invoices/${pdfName}`;
-      const content = await fs.readFile(filePath, 'utf-8');
+      const baseFilePath = path.resolve('/', 'invoices');
+      const resolved = path.resolve(path.join(baseFilePath, pdfName));
+      const baseWithSep = baseFilePath.endsWith(path.sep) ? baseFilePath : baseFilePath + path.sep;
+      if (!resolved.startsWith(baseWithSep)) throw new Error('Access denied');
+
+      const content = await fs.readFile(resolved);
       return content;
     } catch (error) {
       console.error('Error reading receipt file:', error);
       throw new Error('Receipt not found');
     }
   }
-}
+  /////////////////////////////////////////////////////////////////////////
+
+};
 
 export default InvoiceService;

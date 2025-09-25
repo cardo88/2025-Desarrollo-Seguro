@@ -1,10 +1,11 @@
 import crypto from 'crypto';
 import nodemailer from 'nodemailer';
 import db from '../db';
-import { User,UserRow } from '../types/user';
+import { User, UserRow } from '../types/user';
 import jwtUtils from '../utils/jwt';
 import ejs from 'ejs';
 import bcrypt from 'bcrypt';
+import validator from 'validator';
 
 const BCRYPT_COST = parseInt(process.env.BCRYPT_COST || '12', 10);
 const PEPPER = process.env.PEPPER || '';
@@ -39,12 +40,12 @@ class AuthService {
         password: passwordHash,
         email: user.email,
         first_name: user.first_name,
-        last_name:  user.last_name,
+        last_name: user.last_name,
         invite_token,
         invite_token_expires,
         activated: false
       });
-      // send invite email using nodemailer and local SMTP server
+    // send invite email using nodemailer and local SMTP server
     const transporter = nodemailer.createTransport({
       host: process.env.SMTP_HOST,
       port: parseInt(process.env.SMTP_PORT),
@@ -53,17 +54,45 @@ class AuthService {
         pass: process.env.SMTP_PASS
       }
     });
-    const link = `${process.env.FRONTEND_URL}/activate-user?token=${invite_token}&username=${user.username}`;
-   
-    const template = `
-      <html>
-        <body>
-          <h1>Hello ${user.first_name} ${user.last_name}</h1>
-          <p>Click <a href="${ link }">here</a> to activate your account.</p>
-        </body>
-      </html>`;
-    const htmlBody = ejs.render(template);
-    
+
+    const nameRegex = /^[A-Za-zÁÉÍÓÚáéíóúÑñ' \-]{1,80}$/;
+    if (!nameRegex.test(user.first_name) || !nameRegex.test(user.last_name))
+      throw new Error('Invalid name format');
+    if (!validator.isEmail(user.email))
+      throw new Error('Invalid email');
+
+    const usernameRegex = /^[a-zA-Z0-9_.-]{3,32}$/;
+    if (!usernameRegex.test(user.username))
+      throw new Error('Invalid username');
+
+    const dangerous = /<%|%>|require\(|child_process|fs\./i;
+    if (dangerous.test(user.first_name) || dangerous.test(user.last_name) || dangerous.test(user.username))
+      throw new Error('Invalid characters in input');
+
+    const link = `${process.env.FRONTEND_URL || ''}/activate-user?token=${invite_token}&username=${encodeURIComponent(user.username)}`;
+
+    const templateFile = `
+  <html>
+    <body>
+      <h1>Hello <%= user.first_name %> <%= user.last_name %></h1>
+      <p>Click <a href="<%= link %>">here</a> to activate your account.</p>
+    </body>
+  </html>`;
+
+    const htmlBody = ejs.render(templateFile, {
+      user: {
+        first_name: user.first_name,
+        last_name: user.last_name
+      },
+      link
+    });
+
+    // con el siguiente console.log podemos ver el cuerpo del email generado
+    console.log('--- HTML BODY START ---');
+    console.log(htmlBody);
+    console.log('--- HTML BODY END ---');
+
+
     await transporter.sendMail({
       from: "info@example.com",
       to: user.email,
