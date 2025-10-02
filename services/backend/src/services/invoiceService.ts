@@ -1,9 +1,9 @@
-// src/services/invoiceService.ts
 import db from '../db';
 import { Invoice } from '../types/invoice';
 import axios from 'axios';
 import { promises as fs } from 'fs';
 import * as path from 'path';
+import dns from 'dns';
 
 interface InvoiceRow {
   id: string;
@@ -13,19 +13,71 @@ interface InvoiceRow {
   status: string;
 }
 
+const ALLOWED_PAYMENT_HOSTS = new Set([
+  'visa',                 // servicio interno conocido
+  'master',               // servicio interno conocido
+  'payments.example.com'  // ejemplo de host externo permitido
+]);
+
+const PRIVATE_IP_RANGES = [
+  /^127\./,
+  /^10\./,
+  /^172\.(1[6-9]|2[0-9]|3[0-1])\./,
+  /^192\.168\./,
+  /^::1$/,
+  /^fc00:/,
+  /^fe80:/
+];
+
+async function resolveHostname(hostname: string): Promise<string> {
+  try {
+    const res = await dns.promises.lookup(hostname);
+    return res.address;
+  } catch (err) {
+    throw new Error('Could not resolve hostname');
+  }
+}
+
+function isPrivateIp(ip: string): boolean {
+  return PRIVATE_IP_RANGES.some(re => re.test(ip));
+}
+
+function normalizePaymentBrand(input: string): string {
+  return input.replace(/^https?:\/\//i, '').trim();
+}
+
 class InvoiceService {
-  static async list( userId: string, status?: string, operator?: string): Promise<Invoice[]> {
-    let q = db<InvoiceRow>('invoices').where({ userId: userId });
-    if (status) q = q.andWhereRaw(" status "+ operator + " '"+ status +"'");
-    const rows = await q.select();
-    const invoices = rows.map(row => ({
+
+  static async list(userId: string, status?: string, operator?: string): Promise<Invoice[]> {
+    let q = db<InvoiceRow>('invoices').where({ userId });
+
+    if (status) {
+      const allowedStatus = new Set(['paid', 'unpaid']);
+      if (!allowedStatus.has(status)) {
+        throw new Error('Invalid status');
+      }
+
+      const op = operator ?? '=';
+      switch (op) {
+        case '=':
+          q = q.andWhere('status', status);
+          break;
+        case '!=':
+          q = q.andWhereNot('status', status);
+          break;
+        default:
+          throw new Error('Invalid operator');
+      }
+    }
+
+    const rows = await q.select('id', 'userId', 'amount', 'dueDate', 'status');
+    return rows.map(row => ({
       id: row.id,
       userId: row.userId,
       amount: row.amount,
       dueDate: row.dueDate,
-      status: row.status} as Invoice
-    ));
-    return invoices;
+      status: row.status
+    }));
   }
 
   static async setPaymentCard(
@@ -36,53 +88,77 @@ class InvoiceService {
     ccv: string,
     expirationDate: string
   ) {
-    // use axios to call http://paymentBrand/payments as a POST request
-    // with the body containing ccNumber, ccv, expirationDate
-    // and handle the response accordingly
-    const paymentResponse = await axios.post(`http://${paymentBrand}/payments`, {
-      ccNumber,
-      ccv,
-      expirationDate
+    const normalized = normalizePaymentBrand(paymentBrand);
+    const [hostnamePart, portPart] = normalized.split(':');
+    const hostname = hostnamePart;
+    const port = portPart ? parseInt(portPart, 10) : 80;
+
+    if (!ALLOWED_PAYMENT_HOSTS.has(hostname)) {
+      throw new Error('Payment host not allowed');
+    }
+
+    const ip = await resolveHostname(hostname).catch(() => { 
+      throw new Error('Could not resolve payment host'); 
     });
+    if (isPrivateIp(ip)) {
+      throw new Error('Payment host resolves to a private address');
+    }
+
+    const url = `http://${hostname}:${port}/payments`;
+
+    let paymentResponse;
+    try {
+      paymentResponse = await axios.post(url, {
+        ccNumber,
+        ccv,
+        expirationDate
+      }, {
+        maxRedirects: 0,
+        timeout: 5000
+      });
+    } catch (err: any) {
+      throw new Error('Payment failed');
+    }
+
     if (paymentResponse.status !== 200) {
       throw new Error('Payment failed');
     }
 
-    // Update the invoice status in the database
     await db('invoices')
       .where({ id: invoiceId, userId })
-      .update({ status: 'paid' });  
-    };
-  static async  getInvoice( invoiceId:string): Promise<Invoice> {
-    const invoice = await db<InvoiceRow>('invoices').where({ id: invoiceId }).first();
+      .update({ status: 'paid' });
+  }
+
+  /////////////////////////////////////////////////////////////////////////// VULNERABILIDAD; MISSING AUTHORIZATION
+  static async getInvoice(invoiceId: string, currentUserId: string): Promise<Invoice> {
+    const invoice = await db<InvoiceRow>('invoices').where({ id: invoiceId, userId: currentUserId }).first();
     if (!invoice) {
       throw new Error('Invoice not found');
     }
     return invoice as Invoice;
   }
+  /////////////////////////////////////////////////////////////////////////
 
-
-  static async getReceipt(
-    invoiceId: string,
-    pdfName: string
-  ) {
-    // check if the invoice exists
+  /////////////////////////////////////////////////////////////////////////// VULNERABILIDAD; PATH TRAVERSAL
+  static async getReceipt(invoiceId: string, pdfName: string) {
     const invoice = await db<InvoiceRow>('invoices').where({ id: invoiceId }).first();
     if (!invoice) {
       throw new Error('Invoice not found');
     }
     try {
-      const filePath = `/invoices/${pdfName}`;
-      const content = await fs.readFile(filePath, 'utf-8');
+      const baseFilePath = path.resolve('/', 'invoices');
+      const resolved = path.resolve(path.join(baseFilePath, pdfName));
+      const baseWithSep = baseFilePath.endsWith(path.sep) ? baseFilePath : baseFilePath + path.sep;
+      if (!resolved.startsWith(baseWithSep)) throw new Error('Access denied');
+
+      const content = await fs.readFile(resolved);
       return content;
     } catch (error) {
-      // send the error to the standard output
       console.error('Error reading receipt file:', error);
       throw new Error('Receipt not found');
-
-    } 
-
-  };
+    }
+  }
+  /////////////////////////////////////////////////////////////////////////
 
 };
 
