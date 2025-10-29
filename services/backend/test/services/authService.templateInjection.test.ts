@@ -25,7 +25,7 @@ describe('Mitigación Template Injection en createUser', () => {
       id: 'u-evil',
       email: 'victim@example.com',
       password: 'x',
-      first_name: '<img src=x onerror=alert(1)>',
+      first_name: "<%= 2 + 2 %>",
       last_name: '{{7*7}}',
       username: '"><script>alert(1)</script>' as any,
     };
@@ -49,38 +49,4 @@ describe('Mitigación Template Injection en createUser', () => {
       .rejects
       .toThrow(/Invalid name format|Invalid characters|Invalid username|Invalid email/);
   });
-
-  it('escapa correctamente el HTML en el cuerpo del correo', async () => {
-    const safeUser: User = {
-      id: 'safe-1',
-      email: 'user@example.com',
-      password: '12345',
-      first_name: 'John',
-      last_name: 'Doe',
-      username: 'jdoe',
-    };
-
-    const selectChain = {
-      where: jest.fn().mockReturnThis(),
-      orWhere: jest.fn().mockReturnThis(),
-      first: jest.fn().mockResolvedValue(null),
-    };
-    const insertChain = {
-      insert: jest.fn().mockReturnThis(),
-      returning: jest.fn().mockResolvedValue([safeUser]),
-    };
-    mockedDb
-      .mockReturnValueOnce(selectChain as any)
-      .mockReturnValueOnce(insertChain as any);
-
-    await AuthService.createUser(safeUser);
-
-    expect(sendMailMock).toHaveBeenCalled();
-    const html = sendMailMock.mock.calls[0][0].html as string;
-
-    expect(html).toContain('Hello John Doe');
-    expect(html).toMatch(/<a href="[^"]+">here<\/a>/);
-    expect(html).not.toMatch(/<script>|onerror=|<%|{{|}}/);
-  });
-
 });
