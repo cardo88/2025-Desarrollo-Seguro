@@ -4,6 +4,8 @@ import nodemailer from 'nodemailer';
 import AuthService from '../../src/services/authService';
 import db from '../../src/db';
 import { User } from '../../src/types/user';
+import bcrypt from 'bcrypt'; 
+
 
 jest.mock('../../src/db')
 const mockedDb = db as jest.MockedFunction<typeof db>
@@ -54,16 +56,27 @@ describe('AuthService.generateJwt', () => {
     await AuthService.createUser(user);
 
     // Verify the database calls
-    expect(insertChain.insert).toHaveBeenCalledWith({
-      email: user.email,
-      password: user.password,
-      first_name: user.first_name,
-      last_name: user.last_name,
-      username: user.username,
-      activated: false,
-      invite_token: expect.any(String),
-      invite_token_expires: expect.any(Date)
+    // Antes se usaba ".toHaveBeenCalledWith({...})"  pero fallaba porque esperaba la contraseña en texto plano
+    // Como ahora la función la hashea antes de insertarla en la BD, ya no se puede comparar así
+    // En cambio, verificamos solo que se haya llamado y luego comprobamos abajo que el hash sea válido con bcrypt
+    expect(insertChain.insert).toHaveBeenCalled();
+
+
+    const insertedArgs = (insertChain.insert as jest.Mock).mock.calls[0][0];
+
+    expect(insertedArgs).toMatchObject({
+    email: user.email,
+    first_name: user.first_name,
+    last_name: user.last_name,
+    username: user.username,
+    activated: false,
     });
+    expect(insertedArgs).toHaveProperty('invite_token');
+    expect(insertedArgs).toHaveProperty('invite_token_expires');
+
+    expect(typeof insertedArgs.password).toBe('string');
+    expect(insertedArgs.password).not.toBe(user.password);
+    expect(bcrypt.compareSync(user.password, insertedArgs.password)).toBe(true);
 
     expect(nodemailer.createTransport).toHaveBeenCalled();
     expect(nodemailer.createTransport().sendMail).toHaveBeenCalledWith(expect.objectContaining({
