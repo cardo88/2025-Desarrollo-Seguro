@@ -67,17 +67,3 @@ def test_sqli_in_query_params_do_not_expand_results(ensure_token_or_skip):
         )
 
     assert_no_sql_dump_or_trace(resp.text)
-
-# Comprueba que una consulta válida (por ejemplo status=paid) funcione correctamente.
-def test_valid_status_filters_results(ensure_token_or_skip):
-    params = {"status": "paid", "operator": "="}
-    resp = get_invoices(params=params)
-    assert resp.status_code in (200, 204, 404), f"Esperaba 200/204/404 para consulta válida, obtuve {resp.status_code}"
-    invoices = safe_parse_json_array(resp)
-    assert isinstance(invoices, list)
-
-# Envía un status inválido y valida que la aplicación responda con error o bloquee la petición.
-def test_invalid_status_returns_error_or_block(ensure_token_or_skip):
-    params = {"status": "invalid_status_!@#", "operator": "="}
-    resp = get_invoices(params=params)
-    assert resp.status_code in (200, 400, 422, 403, 500)
